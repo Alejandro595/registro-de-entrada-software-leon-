@@ -5,12 +5,6 @@
   </head>
   <body>
     <!DOCTYPE html>
-<html lang="en">
-  <head>
-    <link type="text/css" rel="stylesheet" href="style.css"/>
-  </head>
-  <body>
-    <!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
@@ -148,7 +142,6 @@
       display: none;
       z-index: 9999;
     }
-    /* Breadcrumb style */
     nav#breadcrumb {
       margin: 15px auto;
       width: 90%;
@@ -167,7 +160,6 @@
       cursor: default;
       font-weight: bold;
     }
-    /* Nuevos filtros admin */
     #admin-filters {
       margin: 15px 0 10px;
       display: flex;
@@ -189,9 +181,10 @@
   <div id="login-form">
     <h2>🦁 Registro de Entrada</h2>
     <input type="text" id="username" placeholder="Usuario" />
+    <input type="text" id="cedula" placeholder="Cédula" />
     <input type="password" id="password" placeholder="Contraseña" />
     <select id="role-select">
-      <option value="Usuario">Docente</option>
+      <option value="Usuario">Empleado</option>
       <option value="admin">Administrador</option>
     </select>
     <button id="login-button">🔓 Iniciar sesión</button>
@@ -209,7 +202,7 @@
 
     <h3>📊 Asistencia registrada</h3>
     <table id="attendance-table">
-      <thead><tr><th>Usuario</th><th>Fecha</th><th>Hora</th></tr></thead>
+      <thead><tr><th>Usuario</th><th>Cédula</th><th>Fecha</th><th>Hora</th></tr></thead>
       <tbody></tbody>
     </table>
 
@@ -222,7 +215,7 @@
       </div>
       <button id="download-excel">📥 Descargar Excel</button>
       <table id="admin-attendance">
-        <thead><tr><th>Usuario</th><th>Rol</th><th>Fecha</th><th>Hora</th><th>Acción</th></tr></thead>
+        <thead><tr><th>Usuario</th><th>Cédula</th><th>Rol</th><th>Fecha</th><th>Hora</th><th>Acción</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -235,7 +228,6 @@
   import { getDatabase, ref, push, onValue, remove } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-database.js";
   import * as XLSX from "https://cdn.sheetjs.com/xlsx-0.20.0/package/xlsx.mjs";
 
-  // Config Firebase
   const firebaseConfig = {
     apiKey: "AIzaSyBQFdu36zRwL8OpoX6883pOuDyqcakfurY",
     authDomain: "asistencia-docentes-9de71.firebaseapp.com",
@@ -246,14 +238,13 @@
     appId: "1:535964294750:web:1325e29f01a1e7be41f2be",
   };
 
-  // Inicializar Firebase
   const app = initializeApp(firebaseConfig);
   const db = getDatabase(app);
 
-  // Referencias DOM
   const loginForm = document.getElementById("login-form");
   const container = document.querySelector(".container");
   const usernameInput = document.getElementById("username");
+  const cedulaInput = document.getElementById("cedula");  // Nuevo campo
   const passwordInput = document.getElementById("password");
   const roleSelect = document.getElementById("role-select");
   const loginBtn = document.getElementById("login-button");
@@ -275,14 +266,12 @@
   const loader = document.getElementById("loader");
   const welcomeTitle = document.getElementById("welcome-title");
 
-  // Estado
   let currentUser = null;
   let currentRole = null;
   let usersList = [];
   let attendanceRecords = [];
   let adminRecords = [];
 
-  // Mostrar mensaje popup
   function showMessage(text, duration = 3000) {
     messagePopup.textContent = text;
     messagePopup.style.display = "block";
@@ -291,7 +280,6 @@
     }, duration);
   }
 
-  // Breadcrumb navigation
   function updateBreadcrumb() {
     breadcrumb.innerHTML = "";
     if (!currentUser) {
@@ -301,11 +289,9 @@
     const homeSpan = document.createElement("span");
     homeSpan.textContent = "Inicio";
     homeSpan.style.cursor = "pointer";
-    homeSpan.onclick = () => {
-      showAttendanceView();
-    };
+    homeSpan.onclick = () => { showAttendanceView(); };
     breadcrumb.appendChild(homeSpan);
-    breadcrumb.innerHTML += " &gt; ";
+    breadcrumb.innerHTML += " > ";
     if (currentRole === "admin") {
       const adminSpan = document.createElement("span");
       adminSpan.textContent = "Panel Admin";
@@ -319,7 +305,6 @@
     }
   }
 
-  // Función para iniciar cámara
   async function startCamera() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -329,20 +314,25 @@
     }
   }
 
-  // Guardar usuario y contraseña (en Realtime DB)
-  function saveUser(username, password, role) {
-    const usersRef = ref(db, "usuarios");
-    push(usersRef, { username, password, role });
+  function stopCamera() {
+    if (video.srcObject) {
+      video.srcObject.getTracks().forEach(track => track.stop());
+      video.srcObject = null;
+    }
   }
 
-  // Validar usuario y contraseña (login)
+  function saveUser(username, password, role, cedula) {
+    const usersRef = ref(db, "usuarios");
+    push(usersRef, { username, password, role, cedula });
+  }
+
   function validateUser(username, password, role) {
     return new Promise((resolve) => {
       const usersRef = ref(db, "usuarios");
       onValue(usersRef, (snapshot) => {
         usersList = [];
         let valid = false;
-        snapshot.forEach((child) => {
+        snapshot.forEach(child => {
           const data = child.val();
           const key = child.key;
           usersList.push({ key, ...data });
@@ -350,56 +340,57 @@
             valid = true;
             currentUser = data.username;
             currentRole = data.role;
-            resolve(true);
           }
         });
-        if (!valid) resolve(false);
+        resolve(valid);
       }, { onlyOnce: true });
     });
   }
 
-  // Registrar asistencia
   function registerAttendance(user) {
-    loader.style.display = "block";
-    const now = new Date();
-    const fecha = now.toLocaleDateString("es-ES");
-    const hora = now.toLocaleTimeString("es-ES", { hour12: false });
-    const attendanceRef = ref(db, "asistencia");
-    push(attendanceRef, { username: user, fecha, hora }).then(() => {
-      loader.style.display = "none";
-      showMessage(`Asistencia registrada para ${user}`, 2500);
-      loadAttendance(user);
-      if (currentRole === "admin") {
-        loadAdminAttendance();
-      }
-    });
-  }
+  loader.style.display = "block";
+  const now = new Date();
+  const fecha = now.toLocaleDateString("es-ES");
+  const hora = now.toLocaleTimeString("es-ES", { hour12: false });
 
-  // Cargar asistencia para usuario normal
+  // Buscar cédula del usuario
+  const userObj = usersList.find(u => u.username === user);
+  const cedula = userObj?.cedula || "-";
+
+  const attendanceRef = ref(db, "asistencia");
+  push(attendanceRef, { username: user, cedula, fecha, hora }).then(() => {
+    loader.style.display = "none";
+    showMessage(`Asistencia registrada para ${user}`, 2500);
+    loadAttendance(user);
+    if (currentRole === "admin") loadAdminAttendance();
+  });
+}
+
+
   function loadAttendance(user) {
     const attendanceRef = ref(db, "asistencia");
     onValue(attendanceRef, (snapshot) => {
       attendanceTableBody.innerHTML = "";
       attendanceRecords = [];
-      snapshot.forEach((child) => {
+      snapshot.forEach(child => {
         const data = child.val();
         if (data.username === user) {
           attendanceRecords.push(data);
+          const userObj = usersList.find(u => u.username === data.username);
           const row = document.createElement("tr");
-          row.innerHTML = `<td>${data.username}</td><td>${data.fecha}</td><td>${data.hora}</td>`;
+          row.innerHTML = `<td>${data.username}</td><td>${userObj?.cedula || '-'}</td><td>${data.fecha}</td><td>${data.hora}</td>`;
           attendanceTableBody.appendChild(row);
         }
       });
     }, { onlyOnce: true });
   }
 
-  // Cargar asistencia para admin
   function loadAdminAttendance() {
     const attendanceRef = ref(db, "asistencia");
     onValue(attendanceRef, (snapshot) => {
       adminAttendanceTableBody.innerHTML = "";
       adminRecords = [];
-      snapshot.forEach((child) => {
+      snapshot.forEach(child => {
         const data = child.val();
         adminRecords.push({ key: child.key, ...data });
       });
@@ -407,7 +398,6 @@
     }, { onlyOnce: true });
   }
 
-  // Render tabla admin con filtros
   function renderAdminTable(records) {
     adminAttendanceTableBody.innerHTML = "";
     let filtered = records;
@@ -415,45 +405,44 @@
     const filterUser = filterUserInput.value.toLowerCase();
     const filterDate = filterDateInput.value;
 
-    if (filterUser) {
-      filtered = filtered.filter(r => r.username.toLowerCase().includes(filterUser));
-    }
-    if (filterDate) {
-      filtered = filtered.filter(r => r.fecha === filterDate);
-    }
+    if (filterUser) filtered = filtered.filter(r => r.username.toLowerCase().includes(filterUser));
+    if (filterDate) filtered = filtered.filter(r => r.fecha === filterDate);
 
     filtered.forEach(record => {
       const userData = usersList.find(u => u.username === record.username) || {};
       const tr = document.createElement("tr");
       tr.innerHTML = `
         <td>${record.username}</td>
-        <td>${userData.role || "-"}</td>
+        <td>${userData.cedula || '-'}</td>
+        <td>${userData.role || '-'}</td>
         <td>${record.fecha}</td>
         <td>${record.hora}</td>
-        <td><button class="delete-btn" data-key="${record.key}">Eliminar</button></td>
-      `;
+        <td><button class="delete-btn" data-key="${record.key}">Eliminar</button></td>`;
       adminAttendanceTableBody.appendChild(tr);
     });
 
-    // Eventos para eliminar
     document.querySelectorAll(".delete-btn").forEach(btn => {
       btn.onclick = () => {
         const key = btn.getAttribute("data-key");
-        remove(ref(db, `asistencia/${key}`))
-          .then(() => {
-            showMessage("Registro eliminado");
-            loadAdminAttendance();
-          });
+        remove(ref(db, `asistencia/${key}`)).then(() => {
+          showMessage("Registro eliminado");
+          loadAdminAttendance();
+        });
       };
     });
   }
 
-  // Exportar Excel
   function exportToExcel(records) {
-    const wsData = [["Usuario", "Rol", "Fecha", "Hora"]];
+    const wsData = [["Usuario", "Cédula", "Rol", "Fecha", "Hora"]];
     records.forEach(r => {
-      const userRole = usersList.find(u => u.username === r.username)?.role || "-";
-      wsData.push([r.username, userRole, r.fecha, r.hora]);
+      const user = usersList.find(u => u.username === r.username) || {};
+      wsData.push([
+        r.username,
+        user.cedula || '-',
+        user.role || '-',
+        r.fecha,
+        r.hora
+      ]);
     });
 
     const worksheet = XLSX.utils.aoa_to_sheet(wsData);
@@ -462,7 +451,6 @@
     XLSX.writeFile(workbook, "registro_asistencia.xlsx");
   }
 
-  // Eventos filtros admin
   filterUserInput.oninput = () => renderAdminTable(adminRecords);
   filterDateInput.onchange = () => renderAdminTable(adminRecords);
   clearFiltersBtn.onclick = () => {
@@ -471,7 +459,6 @@
     renderAdminTable(adminRecords);
   };
 
-  // Mostrar vista de login
   function showLoginView() {
     loginForm.style.display = "block";
     container.style.display = "none";
@@ -479,7 +466,6 @@
     updateBreadcrumb();
   }
 
-  // Mostrar vista de asistencia usuario normal
   function showAttendanceView() {
     loginForm.style.display = "none";
     container.style.display = "block";
@@ -490,7 +476,6 @@
     startCamera();
   }
 
-  // Mostrar vista admin
   function showAdminView() {
     loginForm.style.display = "none";
     container.style.display = "block";
@@ -501,45 +486,42 @@
     startCamera();
   }
 
-  // Login
   loginBtn.onclick = async () => {
     const username = usernameInput.value.trim();
     const password = passwordInput.value.trim();
     const role = roleSelect.value;
-    if (!username || !password) {
-      showMessage("Completa usuario y contraseña");
+    if (!username || !password || !cedulaInput.value.trim()) {
+      showMessage("Completa usuario, cédula y contraseña");
       return;
     }
     const valid = await validateUser(username, password, role);
     if (valid) {
       showMessage("Login exitoso");
-      if (role === "admin") showAdminView();
-      else showAttendanceView();
+      (role === "admin") ? showAdminView() : showAttendanceView();
     } else {
-      showMessage("Usuario o contraseña incorrectos");
+      showMessage("Usuario o contraseña (o cédula) incorrectos");
     }
   };
 
-  // Registro
   registerBtn.onclick = () => {
     const username = usernameInput.value.trim();
     const password = passwordInput.value.trim();
+    const cedula = cedulaInput.value.trim();
     const role = roleSelect.value;
-    if (!username || !password) {
-      showMessage("Completa usuario y contraseña");
+
+    if (!username || !password || !cedula) {
+      showMessage("Completa usuario, cédula y contraseña");
       return;
     }
-    // Verificar si usuario existe
     const exists = usersList.some(u => u.username === username);
     if (exists) {
       showMessage("Usuario ya registrado");
       return;
     }
-    saveUser(username, password, role);
+    saveUser(username, password, role, cedula);
     showMessage("Usuario registrado. Ya puedes iniciar sesión.");
   };
 
-  // Logout
   logoutBtn.onclick = () => {
     currentUser = null;
     currentRole = null;
@@ -547,26 +529,15 @@
     adminRecords = [];
     usernameInput.value = "";
     passwordInput.value = "";
+    cedulaInput.value = "";
     showLoginView();
     stopCamera();
   };
 
-  // Registrar asistencia con botón
   captureBtn.onclick = () => {
-    if (currentUser) {
-      registerAttendance(currentUser);
-    }
+    if (currentUser) registerAttendance(currentUser);
   };
 
-  // Cámara: parar cámara
-  function stopCamera() {
-    if (video.srcObject) {
-      video.srcObject.getTracks().forEach(track => track.stop());
-      video.srcObject = null;
-    }
-  }
-
-  // Reconocimiento de voz para login y registro
   async function voiceRecognitionProcess(isLogin) {
     if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
       alert("Tu navegador no soporta reconocimiento de voz");
@@ -578,21 +549,23 @@
     recognition.interimResults = false;
     recognition.maxAlternatives = 1;
 
-    showMessage(`Habla el usuario para ${isLogin ? "login" : "registro"}`, 4000);
-
+    showMessage(`Habla usuario, cédula y contraseña para ${isLogin ? "login" : "registro"}`, 4000);
     recognition.start();
 
     recognition.onresult = async (event) => {
       const spokenText = event.results[0][0].transcript.trim().toLowerCase();
-      const words = spokenText.split(" ");
-      if (words.length < 2) {
-        showMessage("Debes decir usuario y contraseña separados por espacio");
+      const parts = spokenText.split(" ");
+      if (parts.length < 3) {
+        showMessage("Debes decir usuario, cédula y contraseña separados por espacios");
         return;
       }
-      const username = words[0];
-      const password = words.slice(1).join(""); // junta el resto para password
+      const username = parts[0];
+      const cedula = parts[1];
+      const password = parts.slice(2).join("");
       usernameInput.value = username;
+      cedulaInput.value = cedula;
       passwordInput.value = password;
+
       if (isLogin) {
         const role = roleSelect.value;
         const valid = await validateUser(username, password, role);
@@ -600,46 +573,30 @@
           showMessage("Login por voz exitoso");
           currentUser = username;
           currentRole = role;
-          if (role === "admin") showAdminView();
-          else showAttendanceView();
-        } else {
-          showMessage("Usuario o contraseña incorrectos");
-        }
+          (role === "admin") ? showAdminView() : showAttendanceView();
+        } else showMessage("Usuario o contraseña incorrectos");
       } else {
         const exists = usersList.some(u => u.username === username);
-        if (exists) {
-          showMessage("Usuario ya registrado");
-          return;
-        }
+        if (exists) return showMessage("Usuario ya registrado");
         const role = roleSelect.value;
-        saveUser(username, password, role);
+        saveUser(username, password, role, cedula);
         showMessage("Usuario registrado por voz. Ya puedes iniciar sesión.");
       }
     };
 
-    recognition.onerror = (event) => {
-      showMessage("Error en reconocimiento de voz: " + event.error);
-    };
+    recognition.onerror = (event) => showMessage("Error en reconocimiento de voz: " + event.error);
   }
 
   voiceLoginBtn.onclick = () => voiceRecognitionProcess(true);
   voiceRegisterBtn.onclick = () => voiceRecognitionProcess(false);
+  downloadExcelBtn.onclick = () => exportToExcel(adminRecords);
 
-  // Descargar Excel admin
-  downloadExcelBtn.onclick = () => {
-    exportToExcel(adminRecords);
-  };
-
-  // Al cargar la página mostrar login
   showLoginView();
 
 </script>
 </body>
 </html>
 
-    <script type="module" src="script.js"></script>
-  </body>
-</html>
     <script type="module" src="script.js"></script>
   </body>
 </html>
